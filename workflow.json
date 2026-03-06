@@ -1,0 +1,254 @@
+{
+  "name": "Energia Solar La Plata - Bot WhatsApp [TEMPLATE]",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook Twilio",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "CONFIGURAR: Copiar la URL de este webhook y pegarla en Twilio > Messaging > Sandbox > 'WHEN A MESSAGE COMES IN'"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Content-Type", "value": "text/xml" }
+            ]
+          }
+        }
+      },
+      "id": "node-respond-inmediato",
+      "name": "Responder Twilio Inmediato",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [460, 160],
+      "notes": "Responde TwiML vacio a Twilio inmediatamente para evitar timeout. No modificar."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────\n// NODO: Gestionar Sesion\n// Extrae datos del mensaje entrante de Twilio WhatsApp\n// y recupera o crea la sesion del cliente.\n// ─────────────────────────────────────────────────────────\n\nconst body = $input.first().json.body || $input.first().json;\n\nconst from    = body.From || body.from || '';\nconst msgBody = (body.Body || body.body || '').trim();\nconst phone   = from.replace('whatsapp:', '').replace('+', '');\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.sessions) staticData.sessions = {};\n\n// Palabras que reinician la conversacion desde cero\nconst resetWords = ['hola', 'hello', 'hi', 'inicio', 'menu', 'start', 'comenzar', 'reiniciar'];\nconst isReset = resetWords.includes(msgBody.toLowerCase());\n\nif (isReset || !staticData.sessions[phone]) {\n  staticData.sessions[phone] = {\n    phone:          phone,\n    from:           from,\n    step:           'inicio',\n    nombre:         '',\n    localidad:      '',\n    menu_opcion:    '',\n    submenu_opcion: '',\n    timestamp:      new Date().toISOString()\n  };\n}\n\nconst session = staticData.sessions[phone];\nsession.last_message = msgBody;\nsession.last_active  = new Date().toISOString();\nstaticData.sessions[phone] = session;\n\nreturn [{ json: { ...session, incoming_msg: msgBody, phone, from } }];"
+      },
+      "id": "node-session",
+      "name": "Gestionar Sesion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────\n// NODO: Procesar Mensaje\n// Evalua el paso actual de la sesion y genera\n// la respuesta correspondiente al cliente.\n//\n// PERSONALIZAR:\n//   - Textos de los mensajes (variable 'reply')\n//   - Opciones de los menus (objeto 'opciones')\n//   - Subcategorias (objeto 'submenus')\n// ─────────────────────────────────────────────────────────\n\nconst staticData = $getWorkflowStaticData('global');\nconst data    = $input.first().json;\nconst phone   = data.phone;\nconst msg     = data.incoming_msg.trim();\nconst session = staticData.sessions[phone];\n\nlet reply  = '';\nlet guardar = false;\n\n// ── PASO 1: INICIO ──────────────────────────────────────\nif (session.step === 'inicio') {\n  session.step = 'esperando_nombre';\n  reply =\n    `👋 ¡Hola! Bienvenido/a a *[NOMBRE DE TU EMPRESA]* 🌞\\n\\n` +\n    `[DESCRIPCION CORTA DE LA EMPRESA]\\n\\n` +\n    `Para comenzar, ¿podrías decirme tu *nombre completo*?`;\n\n// ── PASO 2: NOMBRE ──────────────────────────────────────\n} else if (session.step === 'esperando_nombre') {\n  session.nombre = msg;\n  session.step   = 'esperando_localidad';\n  reply = `Gracias, *${msg}* 😊\\n\\n¿En qué *localidad* o dirección estás ubicado/a?`;\n\n// ── PASO 3: LOCALIDAD ───────────────────────────────────\n} else if (session.step === 'esperando_localidad') {\n  session.localidad = msg;\n  session.step      = 'menu_principal';\n  reply =\n    `Perfecto, *${session.nombre}* de *${msg}* 📍\\n\\n` +\n    `¿En qué podemos ayudarte hoy?\\n\\n` +\n    `1️⃣ *[OPCION 1]*\\n` +\n    `2️⃣ *[OPCION 2]*\\n` +\n    `3️⃣ *[OPCION 3]*\\n` +\n    `4️⃣ *[OPCION 4]*\\n` +\n    `5️⃣ *Hablar con un asesor*\\n\\n` +\n    `Respondé con el número de tu opción.`;\n\n// ── PASO 4: MENU PRINCIPAL ──────────────────────────────\n} else if (session.step === 'menu_principal') {\n\n  // PERSONALIZAR: Reemplazar nombres y submenus segun tu negocio\n  const opciones = {\n    '1': {\n      nombre:  '[OPCION 1]',\n      submenu: '1️⃣ [Sub-opcion 1.1]\\n2️⃣ [Sub-opcion 1.2]\\n3️⃣ [Sub-opcion 1.3]\\n4️⃣ [Sub-opcion 1.4]\\n5️⃣ [Sub-opcion 1.5]'\n    },\n    '2': {\n      nombre:  '[OPCION 2]',\n      submenu: '1️⃣ [Sub-opcion 2.1]\\n2️⃣ [Sub-opcion 2.2]\\n3️⃣ [Sub-opcion 2.3]\\n4️⃣ [Sub-opcion 2.4]\\n5️⃣ [Sub-opcion 2.5]'\n    },\n    '3': {\n      nombre:  '[OPCION 3]',\n      submenu: '1️⃣ [Sub-opcion 3.1]\\n2️⃣ [Sub-opcion 3.2]\\n3️⃣ [Sub-opcion 3.3]\\n4️⃣ [Sub-opcion 3.4]\\n5️⃣ [Sub-opcion 3.5]'\n    },\n    '4': {\n      nombre:  '[OPCION 4]',\n      submenu: '1️⃣ [Sub-opcion 4.1]\\n2️⃣ [Sub-opcion 4.2]\\n3️⃣ [Sub-opcion 4.3]\\n4️⃣ [Sub-opcion 4.4]\\n5️⃣ [Sub-opcion 4.5]'\n    },\n    '5': { nombre: 'Asesor Humano', submenu: '' }\n  };\n\n  if (opciones[msg]) {\n    session.menu_opcion = opciones[msg].nombre;\n    if (msg === '5') {\n      session.step = 'derivado';\n      reply =\n        `👤 Te paso el contacto de nuestro asesor:\\n\\n` +\n        `📱 WhatsApp: [NUMERO_ASESOR]\\n` +\n        `👨‍💼 [NOMBRE_ASESOR]\\n` +\n        `🕐 [HORARIO_ATENCION]\\n\\n` +\n        `¡Ya fue notificado y te contactará a la brevedad!`;\n    } else {\n      session.step = 'submenu';\n      reply = `*${opciones[msg].nombre}*\\n\\n${opciones[msg].submenu}\\n\\nRespondé con el número.`;\n    }\n  } else {\n    reply =\n      `⚠️ Opción no válida. Respondé con un número del *1 al 5*:\\n\\n` +\n      `1️⃣ [OPCION 1]\\n2️⃣ [OPCION 2]\\n3️⃣ [OPCION 3]\\n4️⃣ [OPCION 4]\\n5️⃣ Hablar con un asesor`;\n  }\n\n// ── PASO 5: SUBMENU ─────────────────────────────────────\n} else if (session.step === 'submenu') {\n\n  // PERSONALIZAR: Coincidir exactamente con los nombres del menu principal\n  const submenus = {\n    '[OPCION 1]': ['[Sub-opcion 1.1]', '[Sub-opcion 1.2]', '[Sub-opcion 1.3]', '[Sub-opcion 1.4]', '[Sub-opcion 1.5]'],\n    '[OPCION 2]': ['[Sub-opcion 2.1]', '[Sub-opcion 2.2]', '[Sub-opcion 2.3]', '[Sub-opcion 2.4]', '[Sub-opcion 2.5]'],\n    '[OPCION 3]': ['[Sub-opcion 3.1]', '[Sub-opcion 3.2]', '[Sub-opcion 3.3]', '[Sub-opcion 3.4]', '[Sub-opcion 3.5]'],\n    '[OPCION 4]': ['[Sub-opcion 4.1]', '[Sub-opcion 4.2]', '[Sub-opcion 4.3]', '[Sub-opcion 4.4]', '[Sub-opcion 4.5]'],\n  };\n\n  const listaOpciones = submenus[session.menu_opcion] || [];\n  const idx = parseInt(msg) - 1;\n\n  if (idx >= 0 && idx < listaOpciones.length) {\n    session.submenu_opcion = listaOpciones[idx];\n    session.step           = 'finalizado';\n    guardar                = true;\n    reply =\n      `✅ *Consulta registrada*\\n\\n` +\n      `📋 Resumen:\\n` +\n      `• Nombre: *${session.nombre}*\\n` +\n      `• Localidad: *${session.localidad}*\\n` +\n      `• Tema: *${session.menu_opcion}*\\n` +\n      `• Detalle: *${session.submenu_opcion}*\\n\\n` +\n      `Un asesor se comunicará a la brevedad. ¿Necesitás algo más?\\n\\n` +\n      `1️⃣ Volver al menú\\n2️⃣ Hablar con un asesor\\n3️⃣ No, gracias`;\n  } else {\n    reply = `⚠️ Opción no válida. Respondé con un número del *1 al 5*.`;\n  }\n\n// ── PASO 6: FINALIZADO ──────────────────────────────────\n} else if (session.step === 'finalizado') {\n  if (msg === '1') {\n    session.step = 'menu_principal';\n    reply =\n      `📋 *Menú principal:*\\n\\n` +\n      `1️⃣ [OPCION 1]\\n2️⃣ [OPCION 2]\\n3️⃣ [OPCION 3]\\n4️⃣ [OPCION 4]\\n5️⃣ Hablar con un asesor`;\n  } else if (msg === '2') {\n    session.step = 'derivado';\n    reply =\n      `👤 Te paso el contacto de nuestro asesor:\\n\\n` +\n      `📱 WhatsApp: [NUMERO_ASESOR]\\n` +\n      `👨‍💼 [NOMBRE_ASESOR]\\n` +\n      `🕐 [HORARIO_ATENCION]`;\n  } else {\n    reply        = `¡Gracias por contactarnos! 😊 Hasta pronto.`;\n    session.step = 'inicio';\n  }\n\n// ── FALLBACK ─────────────────────────────────────────────\n} else {\n  session.step = 'inicio';\n  reply =\n    `👋 ¡Hola! Bienvenido/a a *[NOMBRE DE TU EMPRESA]*\\n\\n` +\n    `¿Podrías decirme tu *nombre completo*?`;\n}\n\nstaticData.sessions[phone] = session;\n\nreturn [{ json: { ...data, reply, guardar, session_data: session } }];"
+      },
+      "id": "node-procesar",
+      "name": "Procesar Mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.guardar }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "node-if-guardar",
+      "name": "Guardar Datos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "notes": "Solo guarda cuando la consulta esta completa (submenu elegido). No guarda mensajes intermedios."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────\n// NODO: Preparar Datos\n// Arma el objeto con los datos a guardar en\n// Google Sheets y Excel.\n// ─────────────────────────────────────────────────────────\n\nconst session = $json.session_data;\nconst now     = new Date();\n\nreturn [{\n  json: {\n    fecha:            now.toLocaleDateString('es-AR'),\n    hora:             now.toLocaleTimeString('es-AR'),\n    nombre:           session.nombre           || '',\n    telefono:         session.from             || '',\n    localidad:        session.localidad        || '',\n    categoria:        session.menu_opcion      || '',\n    consulta_detalle: session.submenu_opcion   || '',\n    resumen:          `${session.nombre} de ${session.localidad} consulto sobre ${session.menu_opcion} - ${session.submenu_opcion}`,\n    estado:           'Pendiente',\n    reply:            $json.reply\n  }\n}];"
+      },
+      "id": "node-preparar-datos",
+      "name": "Preparar Datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 180]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REEMPLAZAR_CON_ID_DE_TU_GOOGLE_SHEET",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Consultas",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fecha":    "={{ $json.fecha }}",
+            "Hora":     "={{ $json.hora }}",
+            "Nombre":   "={{ $json.nombre }}",
+            "Telefono": "={{ $json.telefono }}",
+            "Localidad":"={{ $json.localidad }}",
+            "Categoria":"={{ $json.categoria }}",
+            "Consulta": "={{ $json.consulta_detalle }}",
+            "Resumen":  "={{ $json.resumen }}",
+            "Estado":   "={{ $json.estado }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node-sheets",
+      "name": "Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1340, 100],
+      "notes": "CONFIGURAR: Reemplazar 'REEMPLAZAR_CON_ID_DE_TU_GOOGLE_SHEET' con el ID real de tu hoja. Crear credencial Google Sheets OAuth2 en n8n."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "filePath": "/home/node/.n8n/consultas.xlsx",
+        "options": {
+          "headerRow": true,
+          "sheetName": "Consultas"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fecha":    "={{ $json.fecha }}",
+            "Hora":     "={{ $json.hora }}",
+            "Nombre":   "={{ $json.nombre }}",
+            "Telefono": "={{ $json.telefono }}",
+            "Localidad":"={{ $json.localidad }}",
+            "Categoria":"={{ $json.categoria }}",
+            "Consulta": "={{ $json.consulta_detalle }}",
+            "Resumen":  "={{ $json.resumen }}",
+            "Estado":   "={{ $json.estado }}"
+          }
+        }
+      },
+      "id": "node-excel",
+      "name": "Excel Local",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [1340, 260],
+      "notes": "OPCIONAL: Cambia 'filePath' a la ruta donde quieras guardar el archivo Excel en tu servidor."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────\n// NODO: Preparar Respuesta Twilio\n// Arma el objeto con To, From y Body para\n// enviar la respuesta al cliente via Twilio API.\n//\n// CONFIGURAR:\n//   - From: reemplazar con tu numero Twilio real en produccion\n//     Sandbox:   whatsapp:+14155238886\n//     Produccion: whatsapp:+549XXXXXXXXXX\n// ─────────────────────────────────────────────────────────\n\nconst session = $('Gestionar Sesion').first().json;\nconst data    = $input.first().json;\n\nlet to = session.from || data.from || '';\n\n// Garantizar formato correcto: whatsapp:+XXXXXXXXXXX\nif (to && !to.startsWith('whatsapp:')) {\n  to = 'whatsapp:+' + to.replace(/\\D/g, '');\n}\n\nconst reply = data.reply || 'Gracias por contactarnos.';\n\nreturn [{\n  json: {\n    To:   to,\n    From: 'whatsapp:+14155238886',\n    Body: reply\n  }\n}];"
+      },
+      "id": "node-preparar-twilio",
+      "name": "Preparar Respuesta Twilio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 420]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "requestMethod": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/REEMPLAZAR_CON_TU_ACCOUNT_SID/Messages.json",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "To",   "value": "={{ $json.To }}" },
+            { "name": "From", "value": "={{ $json.From }}" },
+            { "name": "Body", "value": "={{ $json.Body }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-twilio-send",
+      "name": "Enviar WhatsApp Twilio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 420],
+      "notes": "CONFIGURAR:\n1. Reemplazar 'REEMPLAZAR_CON_TU_ACCOUNT_SID' en la URL con tu Account SID real de Twilio.\n2. Crear credencial 'HTTP Basic Auth' en n8n:\n   - User: Account SID (empieza con AC...)\n   - Password: Auth Token\n3. Seleccionar esa credencial en este nodo."
+    }
+  ],
+  "connections": {
+    "Webhook Twilio": {
+      "main": [[
+        { "node": "Responder Twilio Inmediato", "type": "main", "index": 0 },
+        { "node": "Gestionar Sesion",           "type": "main", "index": 0 }
+      ]]
+    },
+    "Gestionar Sesion": {
+      "main": [[{ "node": "Procesar Mensaje", "type": "main", "index": 0 }]]
+    },
+    "Procesar Mensaje": {
+      "main": [[{ "node": "Guardar Datos?", "type": "main", "index": 0 }]]
+    },
+    "Guardar Datos?": {
+      "main": [
+        [{ "node": "Preparar Datos", "type": "main", "index": 0 }],
+        [{ "node": "Preparar Respuesta Twilio", "type": "main", "index": 0 }]
+      ]
+    },
+    "Preparar Datos": {
+      "main": [[
+        { "node": "Google Sheets",  "type": "main", "index": 0 },
+        { "node": "Excel Local",    "type": "main", "index": 0 }
+      ]]
+    },
+    "Google Sheets": {
+      "main": [[{ "node": "Preparar Respuesta Twilio", "type": "main", "index": 0 }]]
+    },
+    "Excel Local": {
+      "main": [[{ "node": "Preparar Respuesta Twilio", "type": "main", "index": 0 }]]
+    },
+    "Preparar Respuesta Twilio": {
+      "main": [[{ "node": "Enviar WhatsApp Twilio", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Bot de WhatsApp para atencion al cliente con menu interactivo. Construido con n8n + Twilio + Google Sheets.",
+    "author": "Tu nombre aqui",
+    "version": "2.0"
+  },
+  "_readme": {
+    "descripcion": "Plantilla de bot WhatsApp con n8n + Twilio. Menu interactivo de 4 categorias con guardado en Google Sheets y Excel.",
+    "configuracion_requerida": [
+      "1. TWILIO: Reemplazar 'REEMPLAZAR_CON_TU_ACCOUNT_SID' en el nodo 'Enviar WhatsApp Twilio' con tu Account SID real.",
+      "2. TWILIO CREDENCIAL: Crear credencial 'HTTP Basic Auth' en n8n (User: Account SID, Password: Auth Token).",
+      "3. TWILIO WEBHOOK: Copiar la URL del nodo 'Webhook Twilio' y pegarla en Twilio > Sandbox > 'WHEN A MESSAGE COMES IN'.",
+      "4. GOOGLE SHEETS: Reemplazar 'REEMPLAZAR_CON_ID_DE_TU_GOOGLE_SHEET' con el ID de tu hoja.",
+      "5. GOOGLE SHEETS CREDENCIAL: Crear credencial Google Sheets OAuth2 en n8n.",
+      "6. MENUS: En el nodo 'Procesar Mensaje', reemplazar [OPCION 1], [OPCION 2], etc. con las opciones reales de tu negocio.",
+      "7. EMPRESA: En el nodo 'Procesar Mensaje', reemplazar [NOMBRE DE TU EMPRESA] y [DESCRIPCION CORTA DE LA EMPRESA].",
+      "8. ASESOR: Reemplazar [NUMERO_ASESOR], [NOMBRE_ASESOR] y [HORARIO_ATENCION] en el nodo 'Procesar Mensaje'.",
+      "9. NGROK (desarrollo): Ejecutar 'ngrok http 5678' y usar la URL HTTPS como base del webhook.",
+      "10. ACTIVAR: Activar el flujo con el toggle en la esquina superior derecha de n8n."
+    ],
+    "notas": [
+      "El numero de telefono del cliente se obtiene automaticamente desde Twilio, no hace falta pedirlo.",
+      "Las sesiones se guardan en Static Data de n8n. Al reiniciar n8n se pierden las sesiones activas.",
+      "Para produccion, considerar usar Redis o una base de datos para persistencia de sesiones.",
+      "El guardado en Google Sheets y Excel solo ocurre cuando el cliente completa el submenu (consulta completa)."
+    ]
+  }
+}
